@@ -4,6 +4,7 @@ library(ggplot2)
 library(gtable)
 library(tidyr)
 library(gridExtra)
+library(grid)
 #Variables to find appropriate files 
 signalFileToken <- "Quantification Amplification Results_SYBR.csv"
 labelFileToken <- "Quantification Summary_0.csv"
@@ -101,7 +102,7 @@ makeSubPlots <- function(df){
             index = index + 1
         } 
         grobz <- lapply(plots, ggplotGrob)
-        format <- matryix(unlist(1:(index-1)), ncol = numPlotColumns, byrow = TRUE)
+        format <- matrix(unlist(1:(index-1)), ncol = numPlotColumns, byrow = TRUE)
 
         gt <- arrangeGrob(grobs = grobz, layout_matrix = format)
 
