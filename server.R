@@ -84,30 +84,40 @@ annotate_data <- function(path){
        return(signal_df_long) 
 }
 
-#Function to make a separate subplot for each unique column name in df
+##Function to make a separate subplot for each unique column name in df
+#makeSubPlots <- function(df){
+#        plots <- list()
+#        index = 1;
+#        for (cond in unique(df$Sample)){
+#            local({
+#               print(cond)
+#               toPlot <- df[df$Sample == cond, ]
+#               plot <- ggplot(toPlot, aes( x = Cycle, y = RFU, col = Well )) +
+#                    geom_line() +
+#                    xlab("Cycle") +
+#                    ylab("RFU") +
+#                    ggtitle(cond)
+#               plots[[index]] <<- plot
+#               })
+#            index = index + 1
+#        } 
+#        grobz <- lapply(plots, ggplotGrob)
+#        format <- matrix(unlist(1:(index-1)), ncol = numPlotColumns, byrow = TRUE)
+#
+#        gt <- arrangeGrob(grobs = grobz, layout_matrix = format)
+#y
+#        return(gt)
+#}
+
 makeSubPlots <- function(df){
-        plots <- list()
-        index = 1;
-        for (cond in unique(df$Sample)){
-            local({
-               print(cond)
-               toPlot <- df[df$Sample == cond, ]
-               plot <- ggplot(toPlot, aes( x = Cycle, y = RFU, col = Well )) +
-                    geom_line() +
-                    xlab("Cycle") +
-                    ylab("RFU") +
-                    ggtitle(cond)
-               plots[[index]] <<- plot
-               })
-            index = index + 1
-        } 
-        grobz <- lapply(plots, ggplotGrob)
-        format <- matrix(unlist(1:(index-1)), ncol = numPlotColumns, byrow = TRUE)
-
-        gt <- arrangeGrob(grobs = grobz, layout_matrix = format)
-
-        return(gt)
+    plot <- ggplot(df, aes( x = Cycle, y = RFU, col = Replicate )) +
+        geom_line() +
+        xlab("Cycle") +
+        ylab("RFU") + 
+        facet_wrap(~Sample, ncol = numPlotColumns)
+    return(plot)
 }
+
 
 #Function to get TTR by midpoint method (TTR = midpoint of peak and baseline value)
 getTTR <- function(df, baselineStart, baselineEnd, minDiff){
@@ -129,6 +139,48 @@ getTTR <- function(df, baselineStart, baselineEnd, minDiff){
     }
 }
 
+getTTR <- function(df_unsorted, baselineStart, baselineEnd, minDiff){
+    df <- df_unsorted[order(df_unsorted$Cycle),]
+    TTR_df <- data.frame(Well = NA, Sample = NA, TTR = NA)
+    TTRindex = 1
+    for (well in unique(df$Well)) {
+       if (TTRindex > 1){
+                 TTR_df[nrow(TTR_df)+1,] <- NA
+          
+       }
+       TTR_df$Well[TTRindex]  = well
+       TTR_df$Sample[TTRindex] = as.character(unique(df$Sample[df$Well == well]))
+       well_subset <- df[df$Well == well,]
+       baselineValue <- mean(well_subset$RFU[ well_subset$Cycle > baselineStart & well_subset$Cycle < baselineEnd  ])
+       peakValue <- max(well_subset$RFU)
+                  
+       if( peakValue - baselineValue < minDiff  ) {
+            TTR_df$TTR[TTRindex] = NA
+          
+        } else {
+            midpoint = (baselineValue + peakValue ) / 2
+            TTR_df$TTR[TTRindex] = well_subset$Cycle[min(which(well_subset$RFU > midpoint))]
+                
+        }
+            TTRindex = TTRindex + 1
+            
+    }
+    return(TTR_df)
+
+}
+
+makeSubPlots <- function(df){ 
+  df$Replicate <- factor(df$Replicate)
+  plot <- ggplot(df, aes( x = Cycle, y = RFU, col = Replicate  )) +
+    geom_line() + 
+    xlab("Cycle") +
+    ylab("RFU") + 
+    facet_wrap(~Sample, ncol = numPlotColumns) +
+    geom_vline(aes(xintercept = TTR), data = TTRdf )
+  return(plot)
+}
+
+
 shinyServer(function(input, output, session) {
                 observeEvent(
                                ignoreNULL = TRUE,
@@ -147,17 +199,16 @@ shinyServer(function(input, output, session) {
                                              print(path)
                                              #Search directory and extract relevant data from signal and label file    
                                              signal_df <- annotate_data(path)
-                                             if (is.na(signal_df)){
+                                             if (all(is.na(signal_df))){
                                                  return()
                                              } 
                                             # write.csv(signal_df, paste(path,"df3.csv", sep="/"))
                                              
                                              #For each unique sample name, make a subplot with each amplification curve
                                              output$Plots <- renderPlot({
-                                                 gt <- makeSubPlots(signal_df)
-                                                 grid.draw(gt)
+                                                 print(makeSubPlots(signal_df))
                                                
-                                             })
+                                             }, height = 1000)
                                    }
                                }
 
