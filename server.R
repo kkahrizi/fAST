@@ -1,14 +1,19 @@
 #Kamin Kahrizi, DiAssess 2018
-library(shiny)
-library(ggplot2)
-library(gtable)
-library(tidyr)
-library(gridExtra)
-library(grid)
+if(!require(shiny)){install.packages("shiny")}
+if(!require(ggplot2)){install.packages("ggplot2")}
+if(!require(gtable)){install.packages("gtable")}
+if(!require(tidyr)){install.packages("tidyr")}
+if(!require(gridExtra)){install.packages("gridExtra")}
+if(!require(grid)){install.packages("grid")}
+
 #Variables to find appropriate files 
 signalFileToken <- "Quantification Amplification Results_SYBR.csv"
 labelFileToken <- "Quantification Summary_0.csv"
-numPlotColumns <- 4
+
+#Initialize global variables
+signal_df <- NA
+TTRdf <- NA
+output_plot <- NA
 
 #Function to show error dialog
 show_error_dialog <- function(errorString){
@@ -120,28 +125,9 @@ makeSubPlots <- function(df){
 
 
 #Function to get TTR by midpoint method (TTR = midpoint of peak and baseline value)
-getTTR <- function(df, baselineStart, baselineEnd, minDiff){
-    TTR_df <- data.frame(Well = NA, Sample = NA, TTR = NA)
-    TTRindex = 1 
-    for (well in unique(df$Well)) {
-        TTR_df$Well[TTRindex]  = well
-        TTR_df$Sample[TTRindex] = df$Sample[df$Well == well]
-        well_subset <- df[df$Well == well,]
-        baselineValue <- mean(well_subset$RFU[ well_subset$Cycle > baselineStart & well_subset$Cycle < baselineEnd ])
-        peakValue <- max(well_subset$RFU)
-        if( peakValue - baselineValue < minDiff ) {
-            TTR_df$TTR[TTRindex] = NA
-        } else {
-            midpoint = (baselineValue + peakValue ) / 2
-            TTR_df$TTR[TTRindex] = df$Cycle[min(which(df$RFU > midpoint))] 
-        }
-        TTRindex = TTRindex + 1
-    }
-}
-
-getTTR <- function(df_unsorted, baselineStart, baselineEnd, minDiff){
+getTTR_midpoint <- function(df_unsorted, baselineStart, baselineEnd, minDiff){
     df <- df_unsorted[order(df_unsorted$Cycle),]
-    TTR_df <- data.frame(Well = NA, Sample = NA, TTR = NA)
+    TTR_df <- data.frame(Well = NA, Sample = NA, TTR = NA, TTRSig = NA)
     TTRindex = 1
     for (well in unique(df$Well)) {
        if (TTRindex > 1){
@@ -156,10 +142,13 @@ getTTR <- function(df_unsorted, baselineStart, baselineEnd, minDiff){
                   
        if( peakValue - baselineValue < minDiff  ) {
             TTR_df$TTR[TTRindex] = NA
+            TTR_df$TTRSig[TTRindex] = NA
           
         } else {
             midpoint = (baselineValue + peakValue ) / 2
-            TTR_df$TTR[TTRindex] = well_subset$Cycle[min(which(well_subset$RFU > midpoint))]
+            thresholdCycle = min(which(well_subset$RFU > midpoint))
+            TTR_df$TTR[TTRindex] = well_subset$Cycle[thresholdCycle]
+            TTR_df$TTRSig[TTRindex] = well_subset$RFU[thresholdCycle]
                 
         }
             TTRindex = TTRindex + 1
@@ -169,14 +158,55 @@ getTTR <- function(df_unsorted, baselineStart, baselineEnd, minDiff){
 
 }
 
-makeSubPlots <- function(df){ 
+#Function to get TTR as inflection point of logistic fit curve
+getTTR_logfit <- function(df_unsorted, minDiff){
+  df <- df_unsorted[order(df_unsorted$Cycle),]
+  TTR_df <- data.frame(Well = NA, Sample = NA, TTR = NA, TTRSig = NA, Scal = NA)
+  TTRindex = 1
+  for (well in unique(df$Well)) {
+    if (TTRindex > 1){
+      TTR_df[nrow(TTR_df)+1,] <- NA
+      
+    }
+    TTR_df$Well[TTRindex]  = well
+    TTR_df$Sample[TTRindex] = as.character(unique(df$Sample[df$Well == well]))
+    well_subset <- df[df$Well == well,]
+    baselineValue <- min(well_subset$RFU)
+    peakValue <- max(well_subset$RFU)
+    baselineCorrected <- well_subset
+    baselineCorrected$RFU <- baselineCorrected$RFU - baselineValue + 1
+    fitted <- nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = baselineCorrected)
+   
+    asm <- summary(fitted)$coefficients[1]
+    xmid <- summary(fitted)$coefficients[2]
+    scal <- summary(fitted)$coefficients[3]
+    
+    if( peakValue - baselineValue < minDiff  ) {
+      TTR_df$TTR[TTRindex] = NA
+      TTR_df$TTRSig[TTRindex] = NA
+      TTR_df$Scal[TTRindex] = NA
+      
+    } else {
+      
+      TTR_df$TTR[TTRindex] = xmid
+      TTR_df$TTRSig[TTRindex] = SSlogis(xmid, asm, xmid, scal) + baselineValue
+      TTR_df$Scal[TTRindex] = scal
+      
+    }
+    TTRindex = TTRindex + 1
+    
+  }
+  return(TTR_df)
+}
+#
+makeSubPlots <- function(df, TTRdf, numPlotColumns){ 
   df$Replicate <- factor(df$Replicate)
   plot <- ggplot(df, aes( x = Cycle, y = RFU, col = Replicate  )) +
     geom_line() + 
     xlab("Cycle") +
     ylab("RFU") + 
     facet_wrap(~Sample, ncol = numPlotColumns) +
-    geom_vline(aes(xintercept = TTR), data = TTRdf )
+    geom_point(aes(x = TTR, y = TTRSig), data = TTRdf, inherit.aes = FALSE ) 
   return(plot)
 }
 
@@ -199,18 +229,53 @@ shinyServer(function(input, output, session) {
                                              print(path)
                                              #Search directory and extract relevant data from signal and label file    
                                              signal_df <- annotate_data(path)
+                                            
                                              if (all(is.na(signal_df))){
                                                  return()
                                              } 
-                                            # write.csv(signal_df, paste(path,"df3.csv", sep="/"))
-                                             
+                                             if (input$TTRmethod == 'Midpoint'){
+                                               TTRdf <- getTTR_midpoint(signal_df, 
+                                                                        input$baselineStart,
+                                                                        input$baselineEnd,
+                                                                        input$minDiff)
+                                             } else if (input$TTRmethod == 'Regression'){
+                                               TTRdf <- getTTR_logfit(signal_df, input$minDiff)
+                                             }
+                                            
+                                            
                                              #For each unique sample name, make a subplot with each amplification curve
                                              output$Plots <- renderPlot({
-                                                 print(makeSubPlots(signal_df))
-                                               
-                                             }, height = 1000)
+                                                 output_plot <- makeSubPlots(signal_df, TTRdf, input$numColumns)
+                                                 print(output_plot)
+                                             }, height = input$plotHeight)
                                    }
                                }
 
                              )
+                            observeEvent(
+                              ignoreNULL = TRUE, 
+                              eventExpr = {
+                                input$analyze
+                              },
+                                handlerExpr = {
+                                  print("Registered here")
+                                  if (all(is.na(signal_df))){
+                                    return()
+                                  } 
+                                  if (input$TTRmethod == 'Midpoint'){
+                                    TTRdf <- getTTR_midpoint(signal_df, 
+                                                                    input$baselineStart,
+                                                                    input$baselineEnd,
+                                                                    input$minDiff)
+                                  } else if (input$TTRmethod == 'Regression'){
+                                    TTRdf <- getTTR_logfit(signal_df, input$minDiff)
+                                  }
+                                  output$Plots <- renderPlot({
+                                    output_plot <- makeSubPlots(signal_df, TTRdf, input$numColumns)
+                                    print(output_plot)
+                                  }, height = input$plotHeight)
+                              }
+                              
+                            )
+                
 })
