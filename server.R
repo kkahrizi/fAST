@@ -3,17 +3,15 @@ if(!require(shiny)){install.packages("shiny")}
 if(!require(ggplot2)){install.packages("ggplot2")}
 if(!require(gtable)){install.packages("gtable")}
 if(!require(tidyr)){install.packages("tidyr")}
-if(!require(gridExtra)){install.packages("gridExtra")}
-if(!require(grid)){install.packages("grid")}
+#if(!require(gridExtra)){install.packages("gridExtra")}
+#if(!require(grid)){install.packages("grid")}
 
 #Variables to find appropriate files 
 signalFileToken <- "Quantification Amplification Results_SYBR.csv"
 labelFileToken <- "Quantification Summary_0.csv"
 
 #Initialize global variables
-signal_df <- NA
-TTRdf <- NA
-output_plot <- NA
+reactive_data <- reactiveValues()
 
 #Function to show error dialog
 show_error_dialog <- function(errorString){
@@ -29,7 +27,7 @@ show_error_dialog <- function(errorString){
 #e.g. Time Sample1 Sample2 
 #        1    0.4    0.5   
 #        2    0.4    0.5   
-annotate_data <- function(path){
+annotate_data <- function(path, convertToMins, conversionFactor, TTRoffset){
         #Scan through files in path for those matching sample and label tokens 
         files_in_folder<- list.files(path, full.names = TRUE)
         signalFileName <- NULL
@@ -69,6 +67,11 @@ annotate_data <- function(path){
          
         #Convert from wide format to long
         signal_df_long <- gather( data = signal_df, key = "Well", value = "RFU", -Cycle)
+
+        #If convertToMins is TRUE, convert cycles to minutes using conversionFactor
+        if(convertToMins) {
+            signal_df_long$Cycle <- (signal_df_long$Cycle * conversionFactor + TTRoffset) / 60
+        }
 
         #Add columns with sample name and replicate number
         signal_df_long$Replicate <- 1
@@ -113,15 +116,6 @@ annotate_data <- function(path){
 #y
 #        return(gt)
 #}
-
-makeSubPlots <- function(df){
-    plot <- ggplot(df, aes( x = Cycle, y = RFU, col = Replicate )) +
-        geom_line() +
-        xlab("Cycle") +
-        ylab("RFU") + 
-        facet_wrap(~Sample, ncol = numPlotColumns)
-    return(plot)
-}
 
 
 #Function to get TTR by midpoint method (TTR = midpoint of peak and baseline value)
@@ -198,17 +192,24 @@ getTTR_logfit <- function(df_unsorted, minDiff){
   }
   return(TTR_df)
 }
-#
-makeSubPlots <- function(df, TTRdf, numPlotColumns){ 
-  df$Replicate <- factor(df$Replicate)
-  plot <- ggplot(df, aes( x = Cycle, y = RFU, col = Replicate  )) +
+
+#Function to make subplots and return a plot to be saved/displayed
+makeSubPlots <- function(df, TTRdf, numPlotColumns, convertToMins){ 
+    if(convertToMins){
+        xAxis <- "Time (minutes)"
+    } else {
+        xAxis <- "Cycle"
+    }
+    df$Replicate <- factor(df$Replicate)
+    plot <- ggplot(df, aes( x = Cycle, y = RFU, col = Replicate  )) +
     geom_line() + 
-    xlab("Cycle") +
+    xlab(xAxis) +
     ylab("RFU") + 
     facet_wrap(~Sample, ncol = numPlotColumns) +
     geom_point(aes(x = TTR, y = TTRSig), data = TTRdf, inherit.aes = FALSE ) 
   return(plot)
 }
+
 
 
 shinyServer(function(input, output, session) {
@@ -219,60 +220,66 @@ shinyServer(function(input, output, session) {
                                },
                                handlerExpr = {
                                    if (input$directory > 0) {
-                                             # condition prevents handler execution on initial app launch
                                              
                                              # launch the directory selection dialog with initial path read from the widget
-                                             path = choose.dir(default = readDirectoryInput(session, 'directory'))
+                                             reactive_data$path = choose.dir(default = readDirectoryInput(session, 'directory'))
                                              # update the widget value
-                                             updateDirectoryInput(session, 'directory', value = path)
+                                             updateDirectoryInput(session, 'directory', value = reactive_data$path)
                                              
-                                             print(path)
                                              #Search directory and extract relevant data from signal and label file    
-                                             signal_df <- annotate_data(path)
+                                             reactive_data$signal_df <- annotate_data(reactive_data$path, input$convertToMins,
+                                                                                     input$cycleConversionFactor, 
+                                                                                     input$TTRoffset)
                                             
-                                             if (all(is.na(signal_df))){
+                                             if (all(is.na(reactive_data$signal_df))){
                                                  return()
                                              } 
                                              if (input$TTRmethod == 'Midpoint'){
-                                               TTRdf <- getTTR_midpoint(signal_df, 
+                                               reactive_data$TTRdf <- getTTR_midpoint(reactive_data$signal_df, 
                                                                         input$baselineStart,
                                                                         input$baselineEnd,
                                                                         input$minDiff)
                                              } else if (input$TTRmethod == 'Regression'){
-                                               TTRdf <- getTTR_logfit(signal_df, input$minDiff)
+                                               reactive_data$TTRdf <- getTTR_logfit(reactive_data$signal_df, input$minDiff)
                                              }
-                                            
-                                            
+                                   
+                              
                                              #For each unique sample name, make a subplot with each amplification curve
+                                             reactive_data$output_plot <- makeSubPlots(reactive_data$signal_df,
+                                                                                       reactive_data$TTRdf, input$numColumns,
+                                                                                       input$convertToMins)
                                              output$Plots <- renderPlot({
-                                                 output_plot <- makeSubPlots(signal_df, TTRdf, input$numColumns)
-                                                 print(output_plot)
+                                                print(reactive_data$output_plot)
                                              }, height = input$plotHeight)
                                    }
                                }
 
                              )
-                            observeEvent(
+                 observeEvent(
                               ignoreNULL = TRUE, 
                               eventExpr = {
                                 input$analyze
                               },
                                 handlerExpr = {
-                                  print("Registered here")
-                                  if (all(is.na(signal_df))){
+                                  reactive_data$signal_df <- annotate_data(reactive_data$path, input$convertToMins, 
+                                                                                      input$cycleConversionFactor,
+                                                                                      input$TTRoffset)
+                                  if (all(is.na(reactive_data$signal_df))){
                                     return()
                                   } 
                                   if (input$TTRmethod == 'Midpoint'){
-                                    TTRdf <- getTTR_midpoint(signal_df, 
+                                    reactive_data$TTRdf <- getTTR_midpoint(reactive_data$signal_df, 
                                                                     input$baselineStart,
                                                                     input$baselineEnd,
                                                                     input$minDiff)
                                   } else if (input$TTRmethod == 'Regression'){
-                                    TTRdf <- getTTR_logfit(signal_df, input$minDiff)
+                                    reactive_data$TTRdf <- getTTR_logfit(reactive_data$signal_df, input$minDiff)
                                   }
+                                  reactive_data$output_plot <- makeSubPlots(reactive_data$signal_df,
+                                                                            reactive_data$TTRdf, input$numColumns,
+                                                                            input$convertToMins)
                                   output$Plots <- renderPlot({
-                                    output_plot <- makeSubPlots(signal_df, TTRdf, input$numColumns)
-                                    print(output_plot)
+                                    print(reactive_data$output_plot)
                                   }, height = input$plotHeight)
                               }
                               
