@@ -3,15 +3,22 @@ if(!require(shiny)){install.packages("shiny")}
 if(!require(ggplot2)){install.packages("ggplot2")}
 if(!require(gtable)){install.packages("gtable")}
 if(!require(tidyr)){install.packages("tidyr")}
+if(!require(testit)){install.packages("testit")}
 #if(!require(gridExtra)){install.packages("gridExtra")}
 #if(!require(grid)){install.packages("grid")}
 
 #Variables to find appropriate files 
 signalFileToken <- "Quantification Amplification Results_SYBR.csv"
 labelFileToken <- "Quantification Summary_0.csv"
+preferenceFile <- "preferences.csv"
+TTRfile <- "TTR_replicates.csv"
+rawDataFile <- "raw_data_long.csv"
+amplificationCurvesFile <- "amplification_curves.png"
 
 #Initialize global variables
 reactive_data <- reactiveValues()
+
+
 
 #Function to show error dialog
 show_error_dialog <- function(errorString){
@@ -171,25 +178,34 @@ getTTR_logfit <- function(df_unsorted, minDiff){
     baselineCorrected$RFU <- baselineCorrected$RFU - baselineValue + 1
     dropped = 0
     maxDropped <- 50
+    asm <- NA
+    xmid <- NA
+    scal <- NA
     result <- tryCatch({
-        while(has_error(nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = baselineCorrected, control = nls.control(warnOnly = TRUE))) &
-            dropped < maxDropped){
-        baselineCorrected <- subset(baselineCorrected, Cycle < max(baselineCorrected$Cycle) - 1)
+     
+      while (has_error(nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = baselineCorrected)) &
+             dropped < maxDropped) {
+        baselineCorrected <-
+          subset(baselineCorrected, Cycle < max(baselineCorrected$Cycle) - 1)
         dropped = dropped + 1
-        
-        }
-        fitted <- nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = baselineCorrected)
+      }
+      fitted <-
+        nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = baselineCorrected)
       
-        asm <- summary(fitted)$coefficients[1]
-        xmid <- summary(fitted)$coefficients[2]
-        scal <- summary(fitted)$coefficients[3]
+      asm <- summary(fitted)$coefficients[1]
+      xmid <- summary(fitted)$coefficients[2]
+      scal <- summary(fitted)$coefficients[3]
     }, error = function(err) {
-      show_error_dialog(paste("There may be something wrong with log regression of this data. Try
-                              the midpoint TTR formula and let Kamin know"))
-      return(NA) 
+      show_error_dialog(
+        paste(
+          "There may be something wrong with log regression of this data. Try
+          the midpoint TTR formula and let Kamin know"
+        )
+        )
+      return(NA)
     }) #END reading from label file
     
-    
+   
     
     if( is.na(asm) | is.na(xmid) | is.na(scal)  ) {
       TTR_df$TTR[TTRindex] = NA
@@ -228,28 +244,91 @@ makeSubPlots <- function(df, TTRdf, numPlotColumns, convertToMins){
 
 
 shinyServer(function(input, output, session) {
+  #Load user preferences from preference file, and apply them to respective fields
+  result <- tryCatch({
+    userPreferences <- read.csv(preferenceFile)
+    updateDirectoryInput(session, 'directory', value = as.character(userPreferences$defaultFolder))
+    reactive_data$path = userPreferences$defaultFolder
+    updateNumericInput(session = session, inputId = "cycleConversionFactor", 
+                       value = as.numeric(userPreferences$conversionFactor) )  
+    updateNumericInput(session = session, inputId = "TTRoffset", 
+                       value = as.numeric(userPreferences$TTRoffset) ) 
+    updateNumericInput(session = session, inputId = "baselineStart", 
+                       value = as.numeric(userPreferences$baselineStart) )
+    updateNumericInput(session = session, inputId = "baselineEnd", 
+                       value = as.numeric(userPreferences$baselineEnd) )
+    updateNumericInput(session = session, inputId = "minDiff", 
+                       value = as.numeric(userPreferences$amplitudeThreshold) )
+    updateNumericInput(session = session, inputId = "plotHeight", 
+                       value = as.numeric(userPreferences$plotHeight) )
+    updateNumericInput(session = session, inputId = "numColumns", 
+                       value = as.numeric(userPreferences$numPlotColumns) )
+    updateCheckboxInput(session = session, inputId = "convertToMins", 
+                        value = as.logical(userPreferences$convert))
+    updateRadioButtons(session = session, inputId = "TTRmethod",
+                       selected = as.character(userPreferences$Method))
+    showNotification("Preferences loaded successfully.")
+  }, error = function(err) {
+    showNotification("Could not find a preferences folder. Using app defaults")
+    return(NA) 
+  }) #END reading from label file
+  
+  
+  
+  #Observe event for preference saving
+  #Saves preferences to file called "preferences.csv" in the shiny installation folder
+  observeEvent(ignoreNULL = TRUE,
+               eventExpr = {
+                 input$saveToFile
+               },
+               handlerExpr = {
+                result <- tryCatch({
+                   TTRloc <- paste(reactive_data$path,TTRfile, sep = "/")
+                   Rawloc <- paste(reactive_data$path,rawDataFile, sep = "/")
+                   plotLoc <- paste(reactive_data$path, amplificationCurvesFile, sep = "/")
+                   write.csv(reactive_data$TTRdf, TTRloc, row.names = FALSE)
+                   write.csv(reactive_data$signal_df, Rawloc, row.names = FALSE)
+                   ggsave(plotLoc, scale = 2, reactive_data$output_plot)
+                   showNotification("Data saved successfully")
+                 }, error = function(err) {
+                   show_error_dialog("Unable to write data file. Make sure no files from selected
+                                     directory are open")
+                   return(NA) 
+                 }) #END reading from label file
+                 
+                 
+               })
+  
+
+  #Observe event for preference saving
+  #Saves preferences to file called "preferences.csv" in the shiny installation folder
+  observeEvent(ignoreNULL = TRUE,
+               eventExpr = {
+                 input$savePreferences
+               },
+               handlerExpr = {
+                 preferenceData <- data.frame(defaultFolder = reactive_data$path,
+                                              convert = input$convertToMins,
+                                              conversionFactor = input$cycleConversionFactor,
+                                              TTRoffset = input$TTRoffset,
+                                              Method = input$TTRmethod,
+                                              baselineStart = input$baselineStart,
+                                              baselineEnd = input$baselineEnd,
+                                              amplitudeThreshold = input$minDiff,
+                                              numPlotColumns = input$numColumns,
+                                              plotHeight = input$plotHeight)
+                 
+                 result <- tryCatch({
+                   write.csv(preferenceData, preferenceFile, row.names = FALSE)
+                   showNotification("Preferences saved successfully")
+                 }, error = function(err) {
+                   show_error_dialog("Unable to write preferences file. Make sure preferences.csv is not open
+                                           and that working directory is set to shiny installation.")
+                   return(NA) 
+                 }) #END reading from label file
+                 
                 
-  output$savePreferences <- downloadHandler(
-    filename = function(){
-      return('fAST_preferences.csv')
-    },
-    content = function(file) {
-      preferenceData <- data.frame(defaultFolder = reactive_data$path,
-                                   convert = input$convertToMins,
-                                   conversionFactor = input$cycleConversionFactor,
-                                   TTRoffset = input$TTRoffset,
-                                   Method = input$TTRmethod,
-                                   baselineStart = input$baselineStart,
-                                   baselineEnd = input$baselineEnd,
-                                   amplitudeThreshold = input$minDiff,
-                                   numPlotColumns = input$numColumns,
-                                   plotHeight = input$plotHeight)
-      write.csv(preferenceData, file, row.names = FALSE)
-    },
-    contentType = 'csv'
-  )
-  
-  
+               })
   
   
   

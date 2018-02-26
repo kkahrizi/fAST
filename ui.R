@@ -1,11 +1,10 @@
 #Kamin Kahrizi, DiAssess 2018
 library(shiny)
-version<-0.1
+version<-"1.0"
 appName <- paste("fLAMP Analysis Software Tool v",version,sep='')
 shinyUI(fluidPage(
 titlePanel(appName),
                 sidebarLayout(sidebarPanel(h2("Options"),
-                                           br(),
                                            directoryInput('directory', label = 'Select a folder',value = '~'),
                                            checkboxInput('convertToMins', label = 'Convert cycles to minutes', 
                                                          value = TRUE),
@@ -26,9 +25,8 @@ titlePanel(appName),
                                                      value = 4, min = 2, max = 6, step = 1),
                                            numericInput('plotHeight', label = 'Height of plot area',
                                                      value = 600, min = 100, max = 10000, step = 100),
-                                           br(), br(), br(), br(),
                                            actionButton(inputId = "analyze", label = "Re-Analyze!"),
-                                           downloadButton("savePreferences", "Save preferences")),
+                                           actionButton(inputId = "savePreferences", label = "Save preferences")),
                                mainPanel(h2("Amplification Plots"),
                                          actionButton(inputId = 'saveToFile', label = "Save data to folder"),
                                          br(), br(), br(), br(), br(),
