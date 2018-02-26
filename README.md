@@ -3,8 +3,8 @@
 ## fAST V1.0
 A software tool written in R using the shiny package for quickly analyzing fLAMP data
 
-### Installing:
-Download all contents to a folder on your desktop (for speed purposes it is recommended to save files on your local disk, not on Egnyte) 
+### Installing:  
+1. Download fAST as zip and extract contents to a folder on your desktop (for speed purposes it is recommended to save files on your local disk, not on Egnyte) 
 
 2. From an R program (e.g. *Rstudio*, R command line), navigate working directory to fAST installation with either: 
 
@@ -13,11 +13,11 @@ Download all contents to a folder on your desktop (for speed purposes it is reco
 setwd(<fAST directory>)
 ```
 3. Load shiny package. 
-If (shiny) is not a part of your installation, first execute: 
+If (shiny) is not a part of your installation, first install it with: 
 ```
 install.packages("shiny") 
 ```
-Then 
+If shiny is already installed: 
 ```
  library(shiny) 
  shiny:: runApp()
