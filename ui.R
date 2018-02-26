@@ -31,6 +31,7 @@ titlePanel(appName),
                                            downloadButton("savePreferences", "Save preferences")),
                                mainPanel(h2("Amplification Plots"),
                                          actionButton(inputId = 'saveToFile', label = "Save data to folder"),
+                                         br(), br(), br(), br(), br(),
                                          plotOutput("Plots")
                                          )
                              )

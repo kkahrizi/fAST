@@ -1,30 +1,46 @@
+library(nlme)
+library(testit)
 df <- data.frame(read.table('df3.csv',sep=',', header=TRUE, row.names = 1))
 for (well in unique(df$Well))
 {
-  fluB_rep1 <- subset(df, Well == well)
+  if(well != "E10"){
+    next 
+  }
+  well_data <- subset(df, Well == well)
   print(well)
-  fluB_rep1$RFU = fluB_rep1$RFU - min(fluB_rep1$RFU) + 1
-  fluB_rep1_normal <- fluB_rep1
-  fluB_rep1_normal$RFU <- fluB_rep1_normal$RFU / max(fluB_rep1_normal$RFU)
+  well_data$RFU = well_data$RFU - min(well_data$RFU) + 1
+  well_data_normal <- well_data
+  well_data_normal$RFU <- well_data_normal$RFU / max(well_data_normal$RFU)
   
-  fitted <- nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = fluB_rep1_normal)
+  #If data starts decreasing near the end of a reaction, interferes with logistic fit. To fix, 
+  #dropped successively more points until fit works
+  # well_data_normal <- subset(well_data_normal, Cycle < 36)
+  try({
+  dropped = 0
+  while(has_error(nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = well_data_normal, trace = TRUE)) &
+        dropped < length(well_data_normal$C)){
+    well_data_normal <- subset(well_data_normal, Cycle < max(well_data_normal$Cycle) - dropped)
+    dropped = dropped + 1
+                               
+  }
+  }, silent = TRUE)
+  fitted <- nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = well_data_normal, trace = TRUE)
   
-  y_h <- SSlogis(fluB_rep1_normal$Cycle, summary(fitted)$coefficients[1], summary(fitted)$coefficients[2], 
+  y_h <- SSlogis(well_data_normal$Cycle, summary(fitted)$coefficients[1], summary(fitted)$coefficients[2], 
                  summary(fitted)$coefficients[3])
   
-  fluB_rep1_fit <- fluB_rep1
-  fluB_rep1_fit$RFU <- y_h
+  well_data_fit <- well_data_normal
+  well_data_fit$RFU <- y_h
   xmid <- summary(fitted)$coefficients[2]
   print(xmid)
   TTR <- data.frame(Cycle = xmid, RFU = SSlogis(xmid, summary(fitted)$coefficients[1], summary(fitted)$coefficients[2], 
                                                 summary(fitted)$coefficients[3]) )
   
-  p1 <- ggplot(data = fluB_rep1, aes(x = Cycle, y = RFU)) +
-    geom_line(data = fluB_rep1, aes(color = 'data')) + 
-    geom_line(data = fluB_rep1_fit, aes(y = RFU *max(fluB_rep1$RFU), color='fit')) + 
-    geom_point(data = TTR, aes(y = RFU * max(fluB_rep1$RFU), color = 'TTR')) +
-    geom_line(data = fluB_rep1_normal, aes(y = RFU * max(fluB_rep1$RFU), color = 'Normal')) + 
-    scale_y_continuous(sec.axis = ~./max(fluB_rep1$RFU), name = 'Normalized data')
+  p1 <- ggplot(data = well_data, aes(x = Cycle, y = RFU)) +
+    geom_line(data = well_data, aes(color = 'data')) + 
+    geom_line(data = well_data_fit, aes(y = RFU *max(well_data$RFU), color='fit')) + 
+    geom_point(data = TTR, aes(y = RFU * max(well_data$RFU), color = 'TTR')) +
+    labs(title = well)
   
   print(p1)
 }
