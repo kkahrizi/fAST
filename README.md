@@ -1,6 +1,6 @@
 # fLAMP Analysis Software Tool
 
-## fAST V1.0
+## fAST v1.0
 A software tool written in R using the shiny package for quickly analyzing fLAMP data
 
 ### Installing:  
