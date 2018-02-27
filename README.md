@@ -3,7 +3,7 @@
 ## fAST v1.0
 A software tool written in R using the shiny package for quickly analyzing fLAMP data
 
-### Installing:  
+### Installation  
 1. Download fAST as zip and extract contents to a folder on your desktop (for speed purposes it is recommended to save files on your local disk, not on Egnyte) 
 
 2. From an R program (e.g. *Rstudio*, R command line), navigate working directory to fAST installation with either: 
@@ -27,7 +27,7 @@ If shiny is already installed:
 
 
 ### Usage
-1. Load thermal cycler data into a folder (on Enygte or personal computer)
+1. Load thermal cycler data into a folder (on Egnyte or personal computer)
 2. Make sure all files from folder are closed on your computer. 
 3. Select folder using fAST UI. 
 4. fAST allows you to change analysis settings before or after selecting a folder. Preferences can be saved to be 
