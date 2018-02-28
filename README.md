@@ -19,9 +19,14 @@ install.packages("shiny")
 ```
 If shiny is already installed: 
 ```
- library(shiny) 
- shiny::runApp()
+ library(shiny)
+ runApp()
 ```
+or simply
+```
+shiny::runApp()
+```
+
 4. The user interface should appear, and/or a url that will work from any browser
 
 
