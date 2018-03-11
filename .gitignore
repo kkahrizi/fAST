@@ -1,0 +1,6 @@
+#Csv files in the fAST directory store preferences/data, each user should have their own
+*.csv
+
+#RData not used for running script
+.RData
+.Rhistory

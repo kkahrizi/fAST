@@ -53,12 +53,12 @@ annotate_data <- function(path, convertToMins, conversionFactor, TTRoffset){
             show_error_dialog("Missing either a data file, or sample file. Please check selected directory.")
             return(NA)
         }
+        
 
         #Now that we know all files of interest exist, we read from them
         result <- tryCatch({
             signal_df <- data.frame(read.table(signalFileName, header = TRUE , sep = ',', blank.lines.skip = TRUE))
             signal_df <- signal_df[,colSums(is.na(signal_df)) < nrow(signal_df)]
-
         }, error = function(err) {
             show_error_dialog( paste("There is something wrong with:", signalFileName) )
             return(NA)     
@@ -169,55 +169,135 @@ getTTR_logfit <- function(df_unsorted, minDiff){
       TTR_df[nrow(TTR_df)+1,] <- NA
       
     }
+    #First extract data for just one well
     TTR_df$Well[TTRindex]  = well
     TTR_df$Sample[TTRindex] = as.character(unique(df$Sample[df$Well == well]))
     well_subset <- df[df$Well == well,]
-    baselineValue <- min(well_subset$RFU)
+    if(unique(well_subset$Sample) == "Pan NTCs"){
+      print(well_subset)
+    }
+    #Find baseline and peak values to use to target the fit window 
+    #around the linear phase. The window is defined as starting from
+    #15 data points before the midpoint and extending to the peak value within
+    #35 data points after the midpoint 
+    baselineValue <- mean(well_subset$RFU[1:6])
     peakValue <- max(well_subset$RFU)
-    baselineCorrected <- well_subset
-    baselineCorrected$RFU <- baselineCorrected$RFU - baselineValue + 1
-    dropped = 0
-    maxDropped <- 50
+    midValue = (baselineValue + peakValue) / 2
+    
     asm <- NA
     xmid <- NA
     scal <- NA
-    result <- tryCatch({
-     
-      while (has_error(nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = baselineCorrected)) &
-             dropped < maxDropped) {
-        baselineCorrected <-
-          subset(baselineCorrected, Cycle < max(baselineCorrected$Cycle) - 1)
-        dropped = dropped + 1
+    midfitValue <- NA
+    if (midValue - baselineValue > minDiff) {
+      midpoint = min(which(well_subset$RFU > midValue))
+      peakpoint = which(well_subset$RFU == 
+                          max(well_subset$RFU[well_subset$Cycle < midpoint + 35]))
+      
+      fitWindow <- well_subset[(midpoint - 10):peakpoint,]
+      
+      fitWindow_baseline <- min(fitWindow$RFU)
+      fitWindow$RFU <- fitWindow$RFU - fitWindow_baseline + 1
+      
+      if (!has_error(fitted <-
+                     nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal),
+                         data = fitWindow))) {
+        asm <- summary(fitted)$coefficients[1]
+        xmid <- summary(fitted)$coefficients[2]
+        scal <- summary(fitted)$coefficients[3]
+        if (xmid < 0 | is.na(xmid)) {
+          showNotification(
+            paste(
+              "Some of your positive data could not fit a logistic curve. Reverting to midpoint method for well",
+              well,
+              sep = ' '
+            )
+          )
+          xmid = well_subset$Cycle[midpoint]
+          scal = NA
+        } else {
+          #For poor fits, value at midpoint is sometimes a smidge off real data.
+          #Correct by adding the smallest difference from the real data at the closest cycle
+          closestCycleIndex <- which.min(abs(well_subset$Cycle - xmid))
+          closestCycle_RFU <- well_subset$RFU[closestCycleIndex]
+          midfitValue <- closestCycle_RFU
+          # midfitValue <- SSlogis(xmid, asm, xmid, scal) + fitWindow_baseline
+          # differences <- well_subset$RFU - midfitValue
+          # midfitCorrection <- differences[which.min(abs(differences))]
+          # midfitValue = midfitValue + midfitCorrection
+          # 
+          
+        }
+        
+      } else {
+        showNotification(
+          paste(
+            "Some of your positive data could not fit a logistic curve. Reverting to midpoint method for well",
+            well,
+            sep = ' '
+          )
+        )
+        xmid = well_subset$Cycle[midpoint]
+        scal = NA
       }
-      fitted <-
-        nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = baselineCorrected)
-      
-      asm <- summary(fitted)$coefficients[1]
-      xmid <- summary(fitted)$coefficients[2]
-      scal <- summary(fitted)$coefficients[3]
-    }, error = function(err) {
-      show_error_dialog(
-        paste(
-          "There may be something wrong with log regression of this data. Try
-          the midpoint TTR formula and let Kamin know"
-        )
-        )
-      return(NA)
-    }) #END reading from label file
-    
-   
-    
-    if( is.na(asm) | is.na(xmid) | is.na(scal)  ) {
-      TTR_df$TTR[TTRindex] = NA
-      TTR_df$TTRSig[TTRindex] = NA
-      TTR_df$Scal[TTRindex] = NA
-    } else {
-      
-      TTR_df$TTR[TTRindex] = xmid
-      TTR_df$TTRSig[TTRindex] = SSlogis(xmid, asm, xmid, scal) + baselineValue
-      TTR_df$Scal[TTRindex] = scal
       
     }
+    
+    TTR_df$TTR[TTRindex] = xmid
+    TTR_df$TTRSig[TTRindex] = midfitValue
+    TTR_df$Scal[TTRindex] = scal
+    
+    
+    # baselineCorrected <- well_subset
+    # baselineCorrected$RFU <- baselineCorrected$RFU - baselineValue + 1
+    # dropped = 0
+    # maxDropped <- 50
+    # 
+    # asm <- NA
+    # xmid <- NA
+    # scal <- NA
+    # if (!(peakValue - baselineValue < minDiff)) {
+    #   result <- tryCatch({
+    #     while (has_error(nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = baselineCorrected)) &
+    #            dropped < maxDropped) {
+    #       baselineCorrected <-
+    #         subset(baselineCorrected,
+    #                Cycle < max(baselineCorrected$Cycle) - 1)
+    #       dropped = dropped + 1
+    #     }
+    #     fitted <-
+    #       nls(RFU ~ SSlogis(Cycle, Asym, xmid, scal), data = baselineCorrected)
+    #     
+    #     asm <- summary(fitted)$coefficients[1]
+    #     xmid <- summary(fitted)$coefficients[2]
+    #     if (xmid < 0) {
+    #       showNotification("Some of your data could not fit a logistic curve,
+    #                        possibly because it was negative")
+    #       xmid = 0
+    #     }
+    #     scal <- summary(fitted)$coefficients[3]
+    #   }, error = function(err) {
+    #     show_error_dialog(
+    #       paste(
+    #         "There may be something wrong with log regression of this data. Try
+    #         the midpoint TTR formula and let Kamin know"
+    #       )
+    #       )
+    #     return(NA)
+    #   }) #END reading from label file
+    #   }
+   
+    
+    # if( is.na(asm) | is.na(xmid) | is.na(scal)  ) {
+    #   TTR_df$TTR[TTRindex] = NA
+    #   TTR_df$TTRSig[TTRindex] = NA
+    #   TTR_df$Scal[TTRindex] = NA
+    # } else {
+    #   
+    #   TTR_df$TTR[TTRindex] = xmid
+    #   TTR_df$TTRSig[TTRindex] = SSlogis(xmid, asm, xmid, scal) + baselineValue
+    #   TTR_df$Scal[TTRindex] = scal
+    #   
+    # }
     TTRindex = TTRindex + 1
     
   }
@@ -225,7 +305,12 @@ getTTR_logfit <- function(df_unsorted, minDiff){
 }
 
 #Function to make subplots and return a plot to be saved/displayed
-makeSubPlots <- function(df, TTRdf, numPlotColumns, convertToMins){ 
+makeSubPlots <- function(df, TTRdf, numPlotColumns, convertToMins, maxCycles){ 
+    if(!is.na(maxCycles)){
+      df <- subset(df, df$Cycle < maxCycles)
+      TTRdf <- subset(TTRdf, TTRdf$TTR < maxCycles)
+    }
+  
     if(convertToMins){
         xAxis <- "Time (minutes)"
     } else {
@@ -263,6 +348,8 @@ shinyServer(function(input, output, session) {
                        value = as.numeric(userPreferences$plotHeight) )
     updateNumericInput(session = session, inputId = "numColumns", 
                        value = as.numeric(userPreferences$numPlotColumns) )
+    updateNumericInput(session = session, inputId = "plotLimit",
+                       value = as.numeric(userPreferences$plotLimit))
     updateCheckboxInput(session = session, inputId = "convertToMins", 
                         value = as.logical(userPreferences$convert))
     updateRadioButtons(session = session, inputId = "TTRmethod",
@@ -271,12 +358,12 @@ shinyServer(function(input, output, session) {
   }, error = function(err) {
     showNotification("Could not find a preferences folder. Using app defaults")
     return(NA) 
-  }) #END reading from label file
+  }) 
   
   
   
-  #Observe event for preference saving
-  #Saves preferences to file called "preferences.csv" in the shiny installation folder
+  #Observe event for saving data
+  #Saves preferences to same folder as raw data
   observeEvent(ignoreNULL = TRUE,
                eventExpr = {
                  input$saveToFile
@@ -286,15 +373,20 @@ shinyServer(function(input, output, session) {
                    TTRloc <- paste(reactive_data$path,TTRfile, sep = "/")
                    Rawloc <- paste(reactive_data$path,rawDataFile, sep = "/")
                    plotLoc <- paste(reactive_data$path, amplificationCurvesFile, sep = "/")
+                  
+                    #If converted cycles to minutes, change the header in the file
+                   Signal_df_toSave <- reactive_data$signal_df
+                   colnames(Signal_df_toSave)[which(names(Signal_df_toSave) == "Cycle")] <- "Time"
+                  
                    write.csv(reactive_data$TTRdf, TTRloc, row.names = FALSE)
-                   write.csv(reactive_data$signal_df, Rawloc, row.names = FALSE)
+                   write.csv(Signal_df_toSave, Rawloc, row.names = FALSE)
                    ggsave(plotLoc, scale = 2, reactive_data$output_plot)
                    showNotification("Data saved successfully")
                  }, error = function(err) {
                    show_error_dialog("Unable to write data file. Make sure no files from selected
                                      directory are open")
                    return(NA) 
-                 }) #END reading from label file
+                 }) 
                  
                  
                })
@@ -316,6 +408,7 @@ shinyServer(function(input, output, session) {
                                               baselineEnd = input$baselineEnd,
                                               amplitudeThreshold = input$minDiff,
                                               numPlotColumns = input$numColumns,
+                                              plotLimit = input$plotLimit,
                                               plotHeight = input$plotHeight)
                  
                  result <- tryCatch({
@@ -341,10 +434,28 @@ shinyServer(function(input, output, session) {
                handlerExpr = {
                  if (input$directory > 0) {
                    # launch the directory selection dialog with initial path read from the widget
-                   reactive_data$path = choose.dir(default = readDirectoryInput(session, 'directory'))
+                   tempPath = choose.dir(default = readDirectoryInput(session, 'directory'))
+                   
+                   
+                   #Bug in file selection implementation in macs causes path to be a list where the first few elements are 
+                   #error reports. Path is always the last element, so extract there
+                   if (length(tempPath) > 1){
+                     tempPath <- tempPath[length(tempPath)]
+                   }
+                   
+                   #No file selected, or some strange problem
+                   if (is.na(tempPath) | grepl('error', tempPath, ignore.case = TRUE)){
+                     showNotification("No file selected")
+                     return()
+                   }
+                   
+                   #Path is probably good, store in reactive_data
+                   reactive_data$path = tempPath
+                   
                    # update the widget value
                    updateDirectoryInput(session, 'directory', value = reactive_data$path)
-                   
+                  
+            
                    #Search directory and extract relevant data from signal and label file
                    reactive_data$signal_df <-
                      annotate_data(
@@ -367,6 +478,7 @@ shinyServer(function(input, output, session) {
                    } else if (input$TTRmethod == 'Regression') {
                      reactive_data$TTRdf <-
                        getTTR_logfit(reactive_data$signal_df, input$minDiff)
+                     
                    }
                    
                    
@@ -376,7 +488,8 @@ shinyServer(function(input, output, session) {
                        reactive_data$signal_df,
                        reactive_data$TTRdf,
                        input$numColumns,
-                       input$convertToMins
+                       input$convertToMins,
+                       input$plotLimit
                      )
                    output$Plots <-
                      renderPlot({
@@ -384,6 +497,8 @@ shinyServer(function(input, output, session) {
                      }, height = input$plotHeight)
                  }
                })
+  #Observe event for re-analyze data. Repeats everything as in folder selection,
+  #except folder selection
   observeEvent(ignoreNULL = TRUE,
                eventExpr = {
                  input$analyze
@@ -409,13 +524,15 @@ shinyServer(function(input, output, session) {
                  } else if (input$TTRmethod == 'Regression') {
                    reactive_data$TTRdf <-
                      getTTR_logfit(reactive_data$signal_df, input$minDiff)
+                   
                  }
                  reactive_data$output_plot <-
                    makeSubPlots(
                      reactive_data$signal_df,
                      reactive_data$TTRdf,
                      input$numColumns,
-                     input$convertToMins
+                     input$convertToMins,
+                     input$plotLimit
                    )
                  output$Plots <- renderPlot({
                    print(reactive_data$output_plot)
