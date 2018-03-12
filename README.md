@@ -1,6 +1,6 @@
 # fLAMP Analysis Software Tool
 
-## fAST v1.0
+## fAST v1.1.0
 A software tool written in R using the shiny package for quickly analyzing fLAMP data
 
 ### Installation  
@@ -43,5 +43,9 @@ Midpoint:
 TTR is defined as Cycle/Time when RFU signal reaches the midpoint of the baseline (defined between baselineStart and baselineEnd) and the peak value
 
 Regression:
-Logistic regression is performed to a fit a logistic curve to the data. TTR is defined as the time by which the fit curve reaches halfway to the asymptote value  
-__Note__: If the algorithm can not fit a logistic regression curve, the last cycle is shaved until at most 50 data points are dropped. This functionality is required for curves where the peak steady-state value is decreasing over time. 
+Logistic regression is performed to a fit a logistic curve to the data. Logistic regression is only performed around a window on the linear phase. TTR is defined as the time by which the fit curve reaches halfway to the asymptote value  
+
+__v1.1.0 Updates__  
+Improved logistic regression for noisy/incomplete data  
+Fixed a bug when saving in OS X  
+Added ability to limit x-axis when plotting  
