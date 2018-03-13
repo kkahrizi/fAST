@@ -1,6 +1,6 @@
 #Kamin Kahrizi, DiAssess 2018
 library(shiny)
-version<-"1.0"
+version<-"1.1.0"
 appName <- paste("fLAMP Analysis Software Tool v",version,sep='')
 shinyUI(fluidPage(
 titlePanel(appName),
